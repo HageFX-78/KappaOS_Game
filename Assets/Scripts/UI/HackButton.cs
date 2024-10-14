@@ -17,12 +17,13 @@ public class HackButton : MonoBehaviour
     public bool IsStartHack = false;
     public bool IsWatchButton = false;
     public bool ISRETRY = false;
+    public bool isEndGame = false;
+
+    public bool guideBook = false;
 
     void Start()
     {
-        if(ISRETRY) return;
-        // Initialize the button's scale to default
-        transform.localScale = defaultScale;
+        defaultScale = transform.localScale ;
         var popupTween = new LocalPositionYTween
         {
             from = transform.localPosition.y - 3,
@@ -31,18 +32,17 @@ public class HackButton : MonoBehaviour
             easeType = EaseType.ElasticOut
         };
         gameObject.AddTween(popupTween);
+        clickScale = defaultScale * 0.9f;
 
     }
 
     void OnMouseEnter()
     {
-        if(ISRETRY) return;
-        StartScaleTween(hoverScale, ref scaleUpTweenInstance, ref scaleDownTweenInstance, 0.1f);
+        StartScaleTween(defaultScale * 1.1f, ref scaleUpTweenInstance, ref scaleDownTweenInstance, 0.1f);
     }
 
     void OnMouseExit()
     {
-        if(ISRETRY) return;
         StartScaleTween(defaultScale, ref scaleDownTweenInstance, ref scaleUpTweenInstance, 0.1f);
     }
 
@@ -52,12 +52,8 @@ public class HackButton : MonoBehaviour
 
         if (clickTweenInstance != null)
             return;
-        AudioManager.amInstance.PlaySF("btn");
-        if (ISRETRY)
-        {
-            GameManager.instance.Retry();
-            return;
-        }
+        AudioManager.amInstance.PlaySF("keyboard");
+        
         // Cancel both existing tweens and create a ping-pong effect for the click
         CancelTweens();
         var tween = new LocalScaleTween
@@ -69,7 +65,22 @@ public class HackButton : MonoBehaviour
             onEnd = (instance) => { 
                 clickTweenInstance = null;
 
-                
+                if (isEndGame)
+                {
+                    Application.Quit();
+                    return;
+                }
+
+                if (guideBook)
+                {
+                    GameManager.instance.ShowGuideBook();
+                    return;
+                }
+                if (ISRETRY)
+                {
+                    GameManager.instance.Retry();
+                    return;
+                }
                 if (IsWatchButton)
                 {
                     GameManager.instance.WatchStream();

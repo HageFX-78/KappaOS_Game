@@ -9,7 +9,9 @@ using Tweens;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
+using System.Linq;
 
+// Whoever reads this, dont look below. It's a mess. I'm sorry.
 
 public enum TweenExpressionType{
     Normal,
@@ -27,7 +29,7 @@ public class Hack{
     public float stressValue;
     public float chaosValue;
     public float duration;
-    public Hack(Action hackFunction, float stressValue = 0f, float chaosValue = 0f, float duration = 0f){
+    public Hack(Action hackFunction, float chaosValue = 0f, float stressValue = 0f,  float duration = 0f){
         this.hackFunction = hackFunction;
         this.stressValue = stressValue;
         this.chaosValue = chaosValue;
@@ -38,10 +40,12 @@ public struct ReimuAction {
     public string chatText;
     public int expressionIndex;
     public TweenExpressionType tweenType;
-    public ReimuAction(string chatText, int expression, TweenExpressionType tweenType){
+    public float duration;
+    public ReimuAction(string chatText, int expression, TweenExpressionType tweenType, float duration = 2f){
         this.chatText = chatText;
         this.expressionIndex = expression;
         this.tweenType = tweenType;
+        this.duration = duration;
     }
 
 }
@@ -65,6 +69,14 @@ public class GameManager : MonoBehaviour
     [SerializeField] private GameObject hackR18Panel;
     [SerializeField] private GameObject hackFlashPanel;
     [SerializeField] private Volume gameLocalPPVolume;
+    [SerializeField] private GameObject shutdownPanel;
+    [SerializeField] private GameObject bannedStreamPanel;
+    [SerializeField] private GameObject streamEndPanel;
+
+    [SerializeField] Sprite[] adSprites;
+
+    [Header("Reimu")]
+    [SerializeField] AudioClip[] reimuSounds;
     private Bloom bloomLayer;
     [Header("UI Hacks")]
     [SerializeField] private GameObject reimuCam;
@@ -74,6 +86,7 @@ public class GameManager : MonoBehaviour
     [SerializeField] private Sprite[] reimuExpressions;
     [SerializeField] private GameObject chatLog;
     [SerializeField] private GameObject chatBlockPrefab;
+    [SerializeField] private GameObject akaSupaPrefab;
 
     [Header("Fake Player HP UI")]
     [SerializeField] private GameObject hpPanel;
@@ -119,27 +132,29 @@ public class GameManager : MonoBehaviour
     }
 
     void Update(){
-        if (Stress > 0 && stressChaosCoroutine == null){
-            stressChaosCoroutine = StartCoroutine(DecrementStressChaos());
-        }
 
         //Test
-        if (Input.GetKeyDown(KeyCode.S)){
+        if(Application.isEditor)
+        {
+            if (Input.GetKeyDown(KeyCode.S)){
             InitHackSelection();
+            }
+            if (Input.GetKeyDown(KeyCode.D)){
+                //StartReimu();
+                StartReimuInGame();
+                StartCoroutine(AutoChatBlock());
+            }
+            if (Input.GetKeyDown(KeyCode.F)){
+                AddChatBlock(HackReactions.NormalReactions);
+            }
         }
-        if (Input.GetKeyDown(KeyCode.D)){
-            SingleLineDialogue(0, "こん霊夢です");
-            TweenExpression(TweenExpressionType.HappyTalk);
-        }
-        if (Input.GetKeyDown(KeyCode.F)){
-            AddChatBlock(HackReactions.NormalReactions);
-        }
+        
     }
 
-#region Big boy functions
-    //--------------------------------------------------------------------------------
+#region KEY FUNCTIONS
     public void WatchStream(){
-        
+        // FIRST
+        AudioManager.amInstance.PlaySF("startup");
         
         var moveToHeaderTween = new AnchoredPositionYTween{
             from = 4,
@@ -167,10 +182,10 @@ public class GameManager : MonoBehaviour
     public void StartReimu()
     {
         GoThroughDialogue(ReimuReactions.GreetingReactions);
-        Invoke("DelayedStartBtn", 16f);
+        Invoke("StartReimuInGame", 16f);
     }
     
-    public void DelayedStartBtn(){
+    public void StartReimuInGame(){
         AudioManager.amInstance.PlayBGM("bgm");
         UpdateHPUI();
         fakeObstacleMove.moveSpeed = 5f;
@@ -178,12 +193,64 @@ public class GameManager : MonoBehaviour
         bg2.moveSpeed = 2f;
         
         startHackingBtn.SetActive(true);
+         UpdateStressChaosUI();
+         stressChaosCoroutine = StartCoroutine(SCPassiveModifier());
     }
     public void StartHacking(){
         InitHackSelection();
         StartCoroutine(SubCountIncrement());
     }
+    public void GameOver(GameOverType gameOverType = GameOverType.Normal){
+        StopAllCoroutines();
+        StopGame();
+        AudioManager.amInstance.StopBGM();
+        switch(gameOverType){
+            case GameOverType.Normal:
+                break;
+            case GameOverType.Banned:
+                bannedStreamPanel.SetActive(true);
+                AudioManager.amInstance.StopBGM();
+                break;
+            case GameOverType.Shutdown:
+                break;
+        }
+        StartCoroutine(GameOverCoroutine());
+    }
+    public IEnumerator GameOverCoroutine(){
+        yield return new WaitForSeconds(1f);
+        BIGHAMD.SetActive(true);
+        AudioManager.amInstance.PlaySF("hand");
+        ShakeKappaCamera(0.2f);
+        yield return new WaitForSeconds(1f);
+        AudioManager.amInstance.PlaySF(reimuSounds[UnityEngine.Random.Range(0, reimuSounds.Length)].name);
+        yield return new WaitForSeconds(1f);
+        var pulldownTween = new LocalPositionYTween{
+            to = -15,
+            duration = 1f,
+            easeType = EaseType.SineInOut,
+            onEnd = (instance) => {
+                AudioManager.amInstance.PlaySF("plyerDeath");
 
+                retryPanel.SetActive(true);
+                scoreTEXT.text = "登録者数: " + subcount.ToString();
+            }
+        };
+        KAPPAOS_MONITOR.AddTween(pulldownTween);
+    }
+    public void Retry(){
+        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    }
+#endregion
+
+#region Big boy functions
+    //--------------------------------------------------------------------------------\
+
+    public void StopGame(){
+        fakeObstacleMove.moveSpeed = 0;
+        bg1.moveSpeed = 0;
+        bg2.moveSpeed = 0;
+        AudioManager.amInstance.StopBGM();
+    }
     //--------------------------------------------------------------------------------
     public void UpdateHPUI(){
         if(hpPanel.transform.childCount > 0){
@@ -210,37 +277,32 @@ public class GameManager : MonoBehaviour
             GameOver();
         }
     }
-    public void GameOver(GameOverType gameOverType = GameOverType.Normal){
-        StopAllCoroutines();
-        AudioManager.amInstance.StopBGM();
-        switch(gameOverType){
-            case GameOverType.Normal:
-                break;
-            case GameOverType.Banned:
-                break;
-            case GameOverType.Shutdown:
-                break;
-        }
-        BIGHAMD.SetActive(true);
-        ShakeKappaCamera(0.5f);
-        var pulldownTween = new LocalPositionYTween{
-            to = -15,
-            duration = 1f,
-            easeType = EaseType.SineInOut,
-            onEnd = (instance) => {
-                AudioManager.amInstance.PlaySF("plyerDeath");
-                //SceneManager.LoadScene(SceneManager.GetActiveScene().name);
-                retryPanel.SetActive(true);
-                scoreTEXT.text = "登録者数: " + subcount.ToString();
-            }
-        };
-        KAPPAOS_MONITOR.AddTween(pulldownTween);
-        
-        
+
+    public GameObject gb1, gb2;
+    public GameObject canvas;
+    public void ShowGuideBook(){
+        gb1.SetActive(true);
+        canvas.SetActive(true);
     }
-    public void Retry(){
-        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    public void Setgb1(){
+        gb1.SetActive(true);
+        gb2.SetActive(false);
     }
+    public void Setgb2(){
+        gb1.SetActive(false);
+        gb2.SetActive(true);
+    }
+    public void CLoseGuideBook(){
+        canvas.SetActive(false);
+    }
+
+    
+#endregion
+#region Stress and Chaos
+
+    [HideInInspector] public float AdditionalHackStressPercentage = 0; 
+    private float PassiveStressModifier = 0.1f;
+    private float PassiveChaosModifier = -0.5f;
     public void SetStressChaos(){
         var popTween = new LocalScaleTween{
             from = new Vector3(1f, 1f, 0f),
@@ -255,29 +317,92 @@ public class GameManager : MonoBehaviour
         Stress += hackStress;
         Chaos += hackChaos;
 
+        if (Stress >= 100){
+            GameOver(GameOverType.Normal);
+        }
         UpdateStressChaosUI();
     }
-    public IEnumerator DecrementStressChaos(){
-        while (Stress > 0){
-            Stress -= 1;
-            Chaos -= 1;
+    public IEnumerator SCPassiveModifier(){
+        while (true){
+            Stress += PassiveStressModifier;
+            Chaos += PassiveChaosModifier;
+
+            if (Stress < 0){
+                Stress = 0;
+            }
+            if (Chaos < 0){
+                Chaos = 0;
+            }
 
             UpdateStressChaosUI();
 
             yield return new WaitForSeconds(3f);
         }
-
-        Stress = 0;
-        Chaos = 0;
-        stressChaosCoroutine = null;
+    }
+    public void AddPassiveStressChaos(float stress, float chaos){
+        PassiveStressModifier += stress;
+        PassiveChaosModifier += chaos;
     }
     public void UpdateStressChaosUI(){
-        stressValue.text = "<color=" + ((Stress > 66f)?"red":((Stress > 33f)?"yellow":"green")) + ">" + Stress + "%</color>";
-        chaosValue.text = "<color=" + ((Chaos > 66f)?"green":((Chaos > 33f)?"yellow":"red")) + ">" + Chaos + "%</color>";
+        Stress = Mathf.Round(Stress * 10.0f) * 0.1f;
+        Chaos = Mathf.Round(Chaos * 10.0f) * 0.1f;
+
+        stressValue.text = "<color=" + ((Stress > 66f)?"red":((Stress > 33f)?"yellow":"green")) + ">" + Stress + "%</color>"
+        + " \n<color=yellow><size=2>(" + PassiveStressModifier + "/s)</color>";
+        chaosValue.text = "<color=" + ((Chaos > 66f)?"green":((Chaos > 33f)?"yellow":"red")) + ">" + Chaos + "%</color>"
+        + " \n<color=yellow><size=2>(" + PassiveChaosModifier + "/s)</color>";
+    }
+#endregion
+#region Sub count
+    private bool subCountMark1Reached = false;//1k
+    private bool subCountMark2Reached = false;//100k
+    private bool subCountMark3Reached = false;//1m
+    private IEnumerator SubCountIncrement(){
+        
+        while (true){
+            subcount += (int)(1 * Chaos);
+            if (subcount >= 1000 && !subCountMark1Reached){
+                subCountMark1Reached = true;
+                TriggerSubCountMark(0);
+            }
+            if (subcount >= 100000 && !subCountMark2Reached){
+                subCountMark2Reached = true;
+                TriggerSubCountMark(1);
+            }
+            if (subcount >= 1000000 && !subCountMark3Reached){
+                subCountMark3Reached = true;
+                TriggerSubCountMark(2);
+            }
+            reimuSubCount.text = subcount.ToString() + "人";
+            yield return new WaitForSeconds(5f);
+        }
     }
 
+    public void TriggerSubCountMark(int markIndex){
+        DestroyCards();
+        if(PrimaryHackCoroutine != null){
+            StopCoroutine(PrimaryHackCoroutine);
+            PrimaryHackCoroutine = null;
+        }
+        switch(markIndex){
+            case 0:
+                GoThroughDialogue(ReimuReactions.SubCountMark1, true);
+                break;
+            case 1:
 
-    public void ShakeGameCamera(float duration){
+                GoThroughDialogue(ReimuReactions.SubCountMark100k, true);
+                break;
+            case 2:
+
+                GoThroughDialogue(ReimuReactions.SubCountMark1M, true);
+                break;
+        }
+    }
+#endregion
+#region Camera
+
+    //--------------------------------------------------------------------------------
+        public void ShakeGameCamera(float duration){
         if (gameCameraShakeCoroutine != null){
             StopCoroutine(gameCameraShakeCoroutine);
         }
@@ -285,7 +410,7 @@ public class GameManager : MonoBehaviour
     }
 
     private IEnumerator ShakeGameCameraCoroutine(float duration){
-        gameCameraNoise.m_AmplitudeGain = 5f;
+        gameCameraNoise.m_AmplitudeGain = 10f;
         gameCameraNoise.m_FrequencyGain = 0.2f;
 
         yield return new WaitForSeconds(duration);
@@ -302,7 +427,7 @@ public class GameManager : MonoBehaviour
          gameCameraShakeCoroutine = StartCoroutine(ShakeKappaCameraCoroutine(duration));
     }
     private IEnumerator ShakeKappaCameraCoroutine(float duration){
-        kappaCameraNoise.m_AmplitudeGain = 5f;
+        kappaCameraNoise.m_AmplitudeGain = 10f;
         kappaCameraNoise.m_FrequencyGain = 0.2f;
 
         yield return new WaitForSeconds(duration);
@@ -310,28 +435,65 @@ public class GameManager : MonoBehaviour
         kappaCameraNoise.m_AmplitudeGain = 0f;
         kappaCameraNoise.m_FrequencyGain = 0f;
     }
-
-    private IEnumerator SubCountIncrement(){
-        while (true){
-            subcount += (int)(1 * Chaos);
-            reimuSubCount.text = subcount.ToString() + "人";
-            yield return new WaitForSeconds(5f);
-        }
-    }
 #endregion
 #region Chat
     //--------------------------------------------------------------------------------
     private Queue<GameObject> chatBlocks = new Queue<GameObject>();
-    public void AddChatBlock(string[] textList){
+
+    public void AddChatBlock(string chatText, bool isRedSupa = false){
         if (chatBlocks.Count >= 20){
             Destroy(chatBlocks.Dequeue());
         }
 
-        string chatText = textList[UnityEngine.Random.Range(0, textList.Length)];
-        string resultString = "<color=grey>" + HackReactions.Usernames[UnityEngine.Random.Range(0, HackReactions.Usernames.Length)] + "</color>: " + chatText;
-        GameObject newChatBlock = Instantiate(chatBlockPrefab, chatLog.transform);
+        GameObject newChatBlock;
+        if (isRedSupa){
+            newChatBlock = Instantiate(akaSupaPrefab, chatLog.transform);
+        }
+        else
+        {    
+            newChatBlock = Instantiate(chatBlockPrefab, chatLog.transform);
+        }
+        string resultString  = "<color=yellow>" + HackReactions.Usernames[UnityEngine.Random.Range(0, HackReactions.Usernames.Length)] + "</color>: " + chatText;
         newChatBlock.GetComponentInChildren<TextMeshProUGUI>().text = resultString;
         chatBlocks.Enqueue(newChatBlock);
+    }
+    public void AddChatBlock(string[] textList, bool isRedSupa = false){
+        if (chatBlocks.Count >= 20){
+            Destroy(chatBlocks.Dequeue());
+        }
+
+        string chatText = "";
+        GameObject newChatBlock;
+        if (isRedSupa){
+            chatText = textList[0];
+            newChatBlock = Instantiate(akaSupaPrefab, chatLog.transform);
+        }
+        else
+        {    
+            chatText = textList[UnityEngine.Random.Range(0, textList.Length)];
+            newChatBlock = Instantiate(chatBlockPrefab, chatLog.transform);
+        }
+        string resultString = "<color=yellow>" + HackReactions.Usernames[UnityEngine.Random.Range(0, HackReactions.Usernames.Length)] + "</color>: " + chatText;
+        newChatBlock.GetComponentInChildren<TextMeshProUGUI>().text = resultString;
+        chatBlocks.Enqueue(newChatBlock);
+    }
+    public void AddChatBlockReaction(string[] theChatList) {
+        StartCoroutine(AddRandomChatMessages(theChatList));
+    }
+
+    private IEnumerator AddRandomChatMessages(string[] theChatList) {
+        // Randomly determine the number of messages to add (between 5 and 10)
+        int numMessages = UnityEngine.Random.Range(5, 11);
+
+        for (int i = 0; i < numMessages; i++) {
+            // Randomly pick a message from the chat list
+            string randomMessage = theChatList[UnityEngine.Random.Range(0, theChatList.Length)];
+
+            AddChatBlock(randomMessage);
+
+            // Wait for a random interval before adding the next message (between 0.5 and 1.5 seconds)
+            yield return new WaitForSeconds(UnityEngine.Random.Range(0.3f, 1.5f));
+        }
     }
     public IEnumerator AutoChatBlock(){
         while (true){
@@ -349,23 +511,27 @@ public class GameManager : MonoBehaviour
     private TweenInstance reimuSpriteTweenInstance;
 
 
-    public void GoThroughDialogue(ReimuAction[] dialogue, float interval = 2f){
+    public void GoThroughDialogue(ReimuAction[] dialogue, bool callFromSpecialEvent = false){
         if (dialogueCoroutine != null){
             StopCoroutine(dialogueCoroutine);
         }
-        dialogueCoroutine = StartCoroutine(DialogueCoroutine(dialogue, interval));
+        dialogueCoroutine = StartCoroutine(DialogueCoroutine(dialogue, callFromSpecialEvent));
     }
-    private IEnumerator DialogueCoroutine(ReimuAction[] rAction, float interval){
+    private IEnumerator DialogueCoroutine(ReimuAction[] rAction, bool callFromSpecialEvent){
         for (int x = 0; x < rAction.Length; x++){
             SingleLineDialogue(rAction[x].expressionIndex, rAction[x].chatText);
             if (rAction[x].tweenType != TweenExpressionType.Normal)
                 TweenExpression(rAction[x].tweenType);
-            yield return new WaitForSeconds(interval);
+            yield return new WaitForSeconds(rAction[x].duration);
         }
         dialogueCoroutine = null;
 
-        // Start idle dialogue
-        GoThroughDialogue(ReimuReactions.NormalReactions, 8f);
+        // // Start idle dialogue
+        // GoThroughDialogue(ReimuReactions.NormalReactions);
+
+        if (callFromSpecialEvent){
+            EndHack();
+        }
     }
     public void SingleLineDialogue(int spriteExpressionIndex, string chatText= "。。。", bool interrupt = false){
         if (interrupt){
@@ -381,6 +547,7 @@ public class GameManager : MonoBehaviour
         
         chatBubbleCoroutine = StartCoroutine(TypeChatBubble(chatText));
     }
+
     public IEnumerator TypeChatBubble(string chatText){
         string currentText = "";
         for (int x = 0; x < chatText.Length; x++){
@@ -443,9 +610,11 @@ public class GameManager : MonoBehaviour
 #region HACKS
         //--------------------------------------------------------------------------------
 
+    private bool faceHasBeenRevealed = false;
     private Dictionary<string, Hack> hacks = new Dictionary<string, Hack>();
     private GameObject[] cardsOnDisplay = new GameObject[3]; 
-    private string[] hackTypes = new string[]{
+    private Coroutine PrimaryHackCoroutine;
+    private List<string> hackTypes = new List<string>{
         "加速",
         "ホラー",
         "広告",
@@ -453,30 +622,32 @@ public class GameManager : MonoBehaviour
         "キラキラ",
         "入り代わり",
         "顔ばれ",
-        //"Shutdown",//td
-        //"住所ばれ",//td
+        "Shutdown",//td
         "HP改造",//td
-        "ノックノック"//td
+        "ノックノック",//td
+        "あかすぱ",
+        "まりさをよぶ"
     };
     private void AddHacks(){
-        hacks.Add("加速", new Hack(Hack_HastenObstacle, 5f, 5f));
-        hacks.Add("ホラー", new Hack(Hack_Horror, 20f, 5f));
-        hacks.Add("広告", new Hack(Hack_Advertisement, 10f, 20f));
-        hacks.Add("R18", new Hack(Hack_R18, 30f, 30f));
-        hacks.Add("キラキラ", new Hack(Hack_Flash, 50f, 40f));
+        hacks.Add("加速", new Hack(Hack_HastenObstacle, 20f, 5f));
+        hacks.Add("ホラー", new Hack(Hack_Horror, 50f, 5f));
+        hacks.Add("広告", new Hack(Hack_Advertisement, 60f, 20f));
+        hacks.Add("R18", new Hack(Hack_R18, 50f, 30f));
+        hacks.Add("キラキラ", new Hack(Hack_Flash, 70f, 40f));
         hacks.Add("入り代わり", new Hack(Hack_SpriteChange, 10f, 10f));
-        hacks.Add("顔ばれ", new Hack(Hack_Kaobare, 50f, 40f));
-        //hacks.Add("Shutdown", new Hack(Hack_Shutdown, 100f, 100f));
-        //hacks.Add("住所ばれ", new Hack(Hack_AddressReveal, 30f, 30f));
+        hacks.Add("顔ばれ", new Hack(Hack_Kaobare, 80f, 40f));
+        hacks.Add("Shutdown", new Hack(Hack_Shutdown, 100f, 100f));
         hacks.Add("HP改造", new Hack(Hack_HPChange, 10f, 10f));
-        hacks.Add("ノックノック", new Hack(Hack_KnockKnock, 30f, 10f));
+        hacks.Add("ノックノック", new Hack(Hack_KnockKnock, 40f, 10f));
+        hacks.Add("あかすぱ", new Hack(Hack_RedSupa, 30f, 10f));
+        hacks.Add("まりさをよぶ", new Hack(Hack_MarisaContact, 20f, 10f));
     }
     public void InitHackSelection(){
         if (cardsOnDisplay[0] != null){
             DestroyCards();
         }
         for (int x = 0; x < hackCardPositions.Length; x++){
-            string randomHack = hackTypes[UnityEngine.Random.Range(0, hackTypes.Length)];
+            string randomHack = hackTypes[UnityEngine.Random.Range(0, hackTypes.Count)];
             GameObject newCard = Instantiate(hackCardPrefab, hackCardPositions[x].transform);
             newCard.name = randomHack;
             newCard.GetComponentInChildren<TextMeshPro>().text = randomHack;
@@ -499,11 +670,25 @@ public class GameManager : MonoBehaviour
         }
         DestroyCards();
     }
-    public void EndHack(){
+   public void EndHack()
+    {
         ReimuAction randomReturnLine = ReimuReactions.ReturnLines[UnityEngine.Random.Range(0, ReimuReactions.ReturnLines.Length)];
-        SingleLineDialogue(randomReturnLine.expressionIndex, randomReturnLine.chatText);
+        
+        // Add randomReturnLine to the start of NormalReactions
+        ReimuAction[] defaultPlusRand = new ReimuAction[] { randomReturnLine }.Concat(ReimuReactions.NormalReactions).ToArray();
+
+        // Reinitiate idle dialogue with defaultPlusRand (which includes randomReturnLine)
+        GoThroughDialogue(defaultPlusRand);
+        
         InitHackSelection();
+
+        if (PrimaryHackCoroutine != null){
+            StopCoroutine(PrimaryHackCoroutine);
+            PrimaryHackCoroutine = null;
+        }
+            
     }
+
 
 
     // Hacks ---------------------------------------------------------------------
@@ -512,7 +697,7 @@ public class GameManager : MonoBehaviour
     // ################################################### Hasten Obstacle ###################################################
     public void Hack_HastenObstacle()
     {
-        StartCoroutine(HackHastenObstacleCoroutine());
+        PrimaryHackCoroutine = StartCoroutine(HackHastenObstacleCoroutine());
     }
     private IEnumerator HackHastenObstacleCoroutine(){
         fakeObstacleMove.SetNewConfig();
@@ -524,7 +709,7 @@ public class GameManager : MonoBehaviour
     }
     // ################################################### Horror ###################################################
     public void Hack_Horror(){
-        StartCoroutine(HackHorrorCoroutine());
+        PrimaryHackCoroutine = StartCoroutine(HackHorrorCoroutine());
     }
     private IEnumerator HackHorrorCoroutine(){
         AudioManager.amInstance.StopBGM();
@@ -539,6 +724,7 @@ public class GameManager : MonoBehaviour
         SetStressChaos();
         yield return new WaitForSeconds(1f);
         hackHorrorPanel.SetActive(false);
+        AddChatBlockReaction(HackReactions.HorrorJumpscareReactions);
         yield return new WaitForSeconds(ReimuReactions.HorrorReactions.Length * 2f);
         AudioManager.amInstance.PlayBGM("bgm");
         EndHack();
@@ -546,7 +732,7 @@ public class GameManager : MonoBehaviour
     }
     // ################################################### Advertisement ###################################################
     public void Hack_Advertisement(){
-        StartCoroutine(HackAdvertisementCoroutine());
+        PrimaryHackCoroutine = StartCoroutine(HackAdvertisementCoroutine());
     }
     private IEnumerator HackAdvertisementCoroutine(){
         Stack<GameObject> adWindows = new Stack<GameObject>();
@@ -554,10 +740,13 @@ public class GameManager : MonoBehaviour
         yield return new WaitForSeconds(1f);
         for (int x = 0; x < 15; x++){
             //Spawn ad prefab around the screen
-            GameObject newAd = Instantiate(adWindowPrefab, new Vector3(UnityEngine.Random.Range(-10f, 10f), UnityEngine.Random.Range(-5f, 5f), 0f), Quaternion.identity);
+            AudioManager.amInstance.PlaySF("popup");
+            GameObject newAd = Instantiate(adWindowPrefab, new Vector3(UnityEngine.Random.Range(-18f, 18f), UnityEngine.Random.Range(-3f, 10f), 0f), Quaternion.identity);
+            newAd.GetComponent<SpriteRenderer>().sprite = adSprites[UnityEngine.Random.Range(0, adSprites.Length)];
             adWindows.Push(newAd);
             yield return new WaitForSeconds(0.1f);
         }
+        AdditionalHackStressPercentage = 30;
         SetStressChaos();
         yield return new WaitForSeconds(1f);
         GoThroughDialogue(ReimuReactions.AdWindowReactions);
@@ -565,34 +754,41 @@ public class GameManager : MonoBehaviour
         
         for (int x = 0; x < 15; x++){
             if (adWindows.Count > 0){
+                AudioManager.amInstance.PlaySF("click");
                 Destroy(adWindows.Pop());
             }
             yield return new WaitForSeconds(0.3f);
         }
         
+        AdditionalHackStressPercentage = 0;
         EndHack();
     }
     // ################################################### R18 ###################################################
     public void Hack_R18(){
-        StartCoroutine(HackR18Coroutine());
+        PrimaryHackCoroutine = StartCoroutine(HackR18Coroutine());
     }
     private IEnumerator HackR18Coroutine(){
         yield return new WaitForSeconds(1f);
         hackR18Panel.SetActive(true);
         GoThroughDialogue(ReimuReactions.R18Reactions);
         yield return new WaitForSeconds(ReimuReactions.R18Reactions.Length * 2f);
+        StopGame();
+
+        yield return new WaitForSeconds(2f);
         GameOver(GameOverType.Banned);
     }
     // ################################################### Flash ###################################################
     public void Hack_Flash(){
-        StartCoroutine(HackFlashCoroutine());
+        PrimaryHackCoroutine = StartCoroutine(HackFlashCoroutine());
     }
     private IEnumerator HackFlashCoroutine(){
         yield return new WaitForSeconds(1f);
-        hackFlashPanel.SetActive(true);
-        bloomLayer.intensity.value = 30f;
+        
         GoThroughDialogue(ReimuReactions.FlashReactions);
         yield return new WaitForSeconds(1f);
+        hackFlashPanel.SetActive(true);
+        bloomLayer.intensity.value = 30f;
+        AudioManager.amInstance.PlaySF("flashbang");
         
         float localTimer = 0f;
         float durationLerp = 5f;
@@ -605,13 +801,14 @@ public class GameManager : MonoBehaviour
         }
         hackFlashPanel.SetActive(false);
         hackFlashPanel.GetComponent<SpriteRenderer>().color = new Color(1f, 1f, 1f, 1f);
+        AddChatBlockReaction(HackReactions.FlashbangReactions);
         SetStressChaos();
-        yield return new WaitForSeconds(ReimuReactions.FlashReactions.Length * 2f);
+        yield return new WaitForSeconds(ReimuReactions.FlashReactions.Length * 2f - 2f);
         EndHack();
     }
     // ################################################### SpriteChange ###################################################
     public void Hack_SpriteChange(){
-        StartCoroutine(HackSpriteChangeCoroutine());
+        PrimaryHackCoroutine = StartCoroutine(HackSpriteChangeCoroutine());
     }
     private IEnumerator HackSpriteChangeCoroutine(){
         yield return new WaitForSeconds(1f);
@@ -620,29 +817,45 @@ public class GameManager : MonoBehaviour
         GoThroughDialogue(ReimuReactions.SpriteSwapReactions);
         yield return new WaitForSeconds(1f);
         backdropSprite.sprite = reimuExpressions[2];
+        AddPassiveStressChaos(0.1f, 0.1f);
+        SetStressChaos();
 
         yield return new WaitForSeconds(ReimuReactions.SpriteSwapReactions.Length * 2f);
         EndHack();
     }
     // ################################################### Kaobare ###################################################
     public void Hack_Kaobare(){
-        StartCoroutine(HackKaobareCoroutine());
+        PrimaryHackCoroutine = StartCoroutine(HackKaobareCoroutine());
     }
     private IEnumerator HackKaobareCoroutine(){
+        ReimuAction[] currentList = faceHasBeenRevealed?ReimuReactions.PostKaobareReactions:ReimuReactions.KaobareReactions;
+
         yield return new WaitForSeconds(1f);
-        GoThroughDialogue(ReimuReactions.KaobareReactions);
+        GoThroughDialogue(currentList);
         yield return new WaitForSeconds(2f);
+        AddChatBlockReaction(HackReactions.FaceRevealReactions);
         SetStressChaos();
-        yield return new WaitForSeconds(ReimuReactions.KaobareReactions.Length * 2f - 2f);
+        yield return new WaitForSeconds(currentList.Length * 2f - 2f);
+
+        faceHasBeenRevealed = true;
         EndHack();
     }
     // ################################################### Shutdown ###################################################
-    // public void Hack_Shutdown(){
-    //     StartCoroutine(HackShutdownCoroutine());
-    // }
-    // private IEnumerator HackShutdownCoroutine(){
-    //     yield return new WaitForSeconds(1f);
-    // }
+    public void Hack_Shutdown(){
+        PrimaryHackCoroutine = StartCoroutine(HackShutdownCoroutine());
+    }
+    private IEnumerator HackShutdownCoroutine(){
+        yield return new WaitForSeconds(1f);
+        StopGame();
+        shutdownPanel.SetActive(true);
+        AudioManager.amInstance.PlaySF("shutdown");
+        yield return new WaitForSeconds(1f);
+        GoThroughDialogue(ReimuReactions.ShutdownReactions);
+        yield return new WaitForSeconds(ReimuReactions.ShutdownReactions.Length * 2f - 2f);
+        streamEndPanel.SetActive(true);
+        yield return new WaitForSeconds(2f);
+        GameOver(GameOverType.Shutdown);
+    }
     // ################################################### AddressReveal ###################################################
     // public void Hack_AddressReveal(){
     //     StartCoroutine(HackAddressRevealCoroutine());
@@ -652,7 +865,7 @@ public class GameManager : MonoBehaviour
     // }
     // ################################################### HPChange ###################################################
     public void Hack_HPChange(){
-        StartCoroutine(HackHPChangeCoroutine());
+        PrimaryHackCoroutine = StartCoroutine(HackHPChangeCoroutine());
     }
     private IEnumerator HackHPChangeCoroutine(){
         int oldHP = fakePlayerHP;
@@ -674,7 +887,7 @@ public class GameManager : MonoBehaviour
     }
     // ################################################### KnockKnock ###################################################       
     public void Hack_KnockKnock(){
-        StartCoroutine(HackKnockKnockCoroutine());
+        PrimaryHackCoroutine = StartCoroutine(HackKnockKnockCoroutine());
     }
     private IEnumerator HackKnockKnockCoroutine(){
         yield return new WaitForSeconds(1f);
@@ -686,5 +899,65 @@ public class GameManager : MonoBehaviour
         EndHack();
     }
 
+    // ################################################### RedSupa ###################################################
+    public void Hack_RedSupa(){
+        PrimaryHackCoroutine = StartCoroutine(HackRedSupaCoroutine());
+    }
+    private IEnumerator HackRedSupaCoroutine(){
+        string[] pickedSupa = HackReactions.AkaSupaList[UnityEngine.Random.Range(0, HackReactions.AkaSupaList.Count)];
+        yield return new WaitForSeconds(1f);
+        AudioManager.amInstance.PlaySF("supacha");
+        AudioManager.amInstance.PlaySF(pickedSupa[1]);
+        AddChatBlock(pickedSupa[0], true);
+        yield return new WaitForSeconds(float.Parse(pickedSupa[2]));
+
+        GoThroughDialogue(ReimuReactions.SupaReactions);
+        SetStressChaos();
+        yield return new WaitForSeconds(ReimuReactions.SupaReactions.Length * 2f + 2f);
+        
+        EndHack();
+    }
+
+    // ################################################### MarisaContact ###################################################
+    private Coroutine MarisaCompanionCoroutine;
+    [SerializeField] public AudioClip[] marisaSounds;
+    public void Hack_MarisaContact(){
+        if (MarisaCompanionCoroutine != null){
+
+            AudioManager.amInstance.PlaySF("marisaExtra");
+            EndHack();
+            return;
+        }
+        PrimaryHackCoroutine = StartCoroutine(HackMarisaContactCoroutine());
+    }
+    private IEnumerator HackMarisaContactCoroutine(){
+        AudioManager.amInstance.PlaySF("marisaKnock");
+        yield return new WaitForSeconds(2f);
+        AudioManager.amInstance.PlaySF("marisaIntroMute");
+        yield return new WaitForSeconds(1f);
+        GoThroughDialogue(ReimuReactions.MarisaContactReactions);
+        yield return new WaitForSeconds(6f);
+        AudioManager.amInstance.PlaySF("marisaDoorOpen");
+        yield return new WaitForSeconds(2f);
+        AudioManager.amInstance.PlaySF("marisaIntro2");
+        AddChatBlockReaction(HackReactions.MarisaIntrudingReactions);
+        yield return new WaitForSeconds(ReimuReactions.MarisaContactReactions.Length * 2f - 8f);
+
+        if (MarisaCompanionCoroutine != null){
+            StopCoroutine(MarisaCompanionCoroutine);
+        }
+        MarisaCompanionCoroutine = StartCoroutine(SpecialMarisaCoroutine());
+        AddPassiveStressChaos(0.5f, 1.5f);
+        SetStressChaos();
+        EndHack();
+    }
+
+    private IEnumerator SpecialMarisaCoroutine(){
+        while (true){
+            yield return new WaitForSeconds(UnityEngine.Random.Range(5f, 10f));
+            AudioManager.amInstance.PlaySF(marisaSounds[UnityEngine.Random.Range(0, marisaSounds.Length)].name);
+        }
+        
+    }
 #endregion
 }

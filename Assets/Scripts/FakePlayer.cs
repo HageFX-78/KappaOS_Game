@@ -34,7 +34,7 @@ public class FakePlayer : MonoBehaviour
     void OnCollisionEnter2D(Collision2D collision){
 
         if (collision.gameObject.CompareTag("JumpTrigger") && isGrounded){
-            if(Random.Range(0, 101) >= GameManager.instance.Stress * stressMultiplier)
+            if(Random.Range(0, 101) >= GameManager.instance.Stress * stressMultiplier + GameManager.instance.AdditionalHackStressPercentage)
                 Jump();
         }
 
